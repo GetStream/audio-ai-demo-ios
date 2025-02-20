@@ -8,32 +8,97 @@
 import SwiftUI
 import StreamVideo
 
+enum AISpeakerState {
+    case aiSpeaking
+    case userSpeaking
+    case idle
+}
+
+extension AISpeakerState {
+    var gradientColors: [Color] {
+        switch self {
+        case .userSpeaking:
+            return [
+                Color.red,
+                Color.red.opacity(0.0)
+            ]
+        default:
+            return [
+                Color(red: 0.0, green: 0.976, blue: 1.0),
+                Color(red: 0.0, green: 0.227, blue: 1.0, opacity: 0.0)
+            ]
+        }
+    }
+}
+
 struct AISpeakingView: View {
+    private let agentId = "lucy"
+    
     @ObservedObject var callState: CallState
     
     @State var amplitude: CGFloat = 0.0
+    @State var aiParticipant: CallParticipant?
+    @State var audioLevels = [Float]()
+    @State var speakerState: AISpeakerState = .idle
         
     var body: some View {
-        GlowView(amplitude: amplitude)
+        GlowView(amplitude: amplitude, gradientColors: speakerState.gradientColors)
             .frame(maxWidth: .infinity, maxHeight: .infinity)
             .padding()
             .background(Color.black)
-            .onReceive(callState.$statsReport) { output in
-                guard let statsReport = output?.subscriberRawStats?.statistics else { return }
-                for (_, stats) in statsReport {
-                    if stats.type == "inbound-rtp" {
-                        if let audioLevel = stats.values["audioLevel"] as? Double {
-                            amplitude = CGFloat(audioLevel)
-                        }
-                    }
+            .onReceive(callState.$participants) { _ in
+                if let participant = self.callState.participants.first(where: { $0.userId.contains(agentId) }) {
+                    aiParticipant = participant
                 }
             }
+            .onChange(of: callState.activeSpeakers) { oldSpeakers, newSpeakers in
+                if let speaker = newSpeakers.first(where: { participant in
+                    participant.userId.contains(agentId)
+                }) {
+                    if speakerState != .aiSpeaking {
+                        self.speakerState = .aiSpeaking
+                    }
+                    self.audioLevels = speaker.audioLevels
+                        .map { value in
+                            value / Float(Int.random(in: 1...3))
+                        }
+                } else if let speaker = newSpeakers.first(where: { $0.id == callState.localParticipant?.id }) {
+                    if speakerState != .userSpeaking {
+                        self.speakerState = .userSpeaking
+                    }
+                    self.audioLevels = speaker.audioLevels
+                } else {
+                    self.speakerState = .idle
+                    self.audioLevels = []
+                }
+                self.amplitude = computeSingleAmplitude(from: audioLevels)
+            }
+    }
+    
+    func computeSingleAmplitude(from levels: [Float]) -> CGFloat {
+        let normalized = normalizePeak(levels)
+        guard !normalized.isEmpty else { return 0 }
+        
+        let sum = normalized.reduce(0, +)
+        let average = sum / Float(normalized.count)
+        return CGFloat(average)
+    }
+    
+    func normalizePeak(_ levels: [Float]) -> [Float] {
+        // 1) Find the peak (largest absolute value)
+        guard let maxLevel = levels.map({ abs($0) }).max(), maxLevel > 0 else {
+            return levels // Avoid dividing by zero if empty or all zeros
+        }
+        
+        // 2) Divide each sample by the peak
+        return levels.map { $0 / maxLevel }
     }
 }
 
 struct GlowView: View {
     /// Normalized audio level [0.0 ... 1.0]
     let amplitude: CGFloat
+    let gradientColors: [Color]
     
     @State private var time: CGFloat = 0
     @State private var rotationAngle: CGFloat = 0
@@ -50,7 +115,8 @@ struct GlowView: View {
                     scaleRange: 0.3,   // how much amplitude grows it
                     waveRangeMin: 0.2, // bigger morph at low amplitude
                     waveRangeMax: 0.02, // smaller morph at high amplitude
-                    geoSize: geo.size
+                    geoSize: geo.size,
+                    gradientColors: gradientColors
                 )
                 
                 // LAYER 2 (Mid)
@@ -62,7 +128,8 @@ struct GlowView: View {
                     scaleRange: 0.3,
                     waveRangeMin: 0.15,
                     waveRangeMax: 0.03,
-                    geoSize: geo.size
+                    geoSize: geo.size,
+                    gradientColors: gradientColors
                 )
                 
                 // LAYER 3 (Bright Core)
@@ -74,7 +141,8 @@ struct GlowView: View {
                     scaleRange: 0.5,
                     waveRangeMin: 0.35,
                     waveRangeMax: 0.05,
-                    geoSize: geo.size
+                    geoSize: geo.size,
+                    gradientColors: gradientColors
                 )
             }
             .frame(width: geo.size.width, height: geo.size.height)
@@ -101,7 +169,6 @@ struct GlowView: View {
         }
     }
     
-    /// A single glow “layer” in the color scheme #00F9FF → #003AFF(transparent).
     /// - `baseRadiusMin` / `baseRadiusMax`: radius shrinks/grows with amplitude
     /// - `waveRangeMin` / `waveRangeMax`: morphing is stronger at low amplitude, weaker at high amplitude
     private func glowLayer(
@@ -112,7 +179,8 @@ struct GlowView: View {
         scaleRange: CGFloat,
         waveRangeMin: CGFloat,
         waveRangeMax: CGFloat,
-        geoSize: CGSize
+        geoSize: CGSize,
+        gradientColors: [Color]
     ) -> some View {
         
         // The actual radius = lerp from min->max based on amplitude
@@ -122,11 +190,10 @@ struct GlowView: View {
         // => just invert the parameter. Another approach: waveRange = waveRangeMax + (waveRangeMin-waveRangeMax)*(1 - amplitude).
         let waveRange = lerp(a: waveRangeMax, b: waveRangeMin, t: (1 - amplitude))
         
-        // Our color gradient: #00F9FF center => #003AFF (transparent) edges
         let gradient = RadialGradient(
             gradient: Gradient(stops: [
-                .init(color: Color(red: 0.0, green: 0.976, blue: 1.0), location: 0.0),
-                .init(color: Color(red: 0.0, green: 0.227, blue: 1.0, opacity: 0.0), location: 1.0)
+                .init(color: gradientColors[0], location: 0.0),
+                .init(color: gradientColors[1], location: 1.0)
             ]),
             center: .center,
             startRadius: 0,

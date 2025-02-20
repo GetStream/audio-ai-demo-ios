@@ -58,6 +58,7 @@ struct AIVideoDemoApp: App {
                             }
                             .onReceive(call.state.$closedCaptions) { captions = $0 }
                         )
+                        .id(call.cId)
                 } else if callState == .joining {
                     HStack {
                         Text("Waiting for AI agent to join...")
@@ -65,6 +66,7 @@ struct AIVideoDemoApp: App {
                     }
                 } else {
                     Button {
+                        guard callState == .idle else { return }
                         Task {
                             do {
                                 self.callState = .joining
@@ -75,7 +77,6 @@ struct AIVideoDemoApp: App {
                                     callId: credentials.callId
                                 )
                                 try await call?.join(create: true)
-                                call?.updateStatsCollectionInterval(0.25)
                                 self.callState = .active
                             } catch {
                                 print(error)
@@ -92,6 +93,7 @@ struct AIVideoDemoApp: App {
             .frame(maxWidth: .infinity, maxHeight: .infinity)
             .background(Color.black.edgesIgnoringSafeArea(.all))
             .onAppear {
+                guard connectTask == nil else { return }
                 connectTask = Task {
                     try await connect()
                 }
