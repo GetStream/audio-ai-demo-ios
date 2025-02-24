@@ -14,9 +14,6 @@ struct AIVideoDemoApp: App {
     
     @State var streamVideo: StreamVideo?
     @State var call: Call?
-    
-    @State var currentLevel: CGFloat = 0
-    @State var aiParticipant: CallParticipant?
     @State var credentials: Credentials?
     @State var connectTask: Task<Void, Error>?
     @State var callState: AICallState = .idle
@@ -68,20 +65,7 @@ struct AIVideoDemoApp: App {
                     Button {
                         guard callState == .idle else { return }
                         Task {
-                            do {
-                                self.callState = .joining
-                                _ = await connectTask?.result
-                                guard let credentials, let streamVideo else { return }
-                                self.call = streamVideo.call(
-                                    callType: credentials.callType,
-                                    callId: credentials.callId
-                                )
-                                try await call?.join(create: true)
-                                self.callState = .active
-                            } catch {
-                                print(error)
-                                self.callState = .idle
-                            }
+                            try await joinCall()
                         }
                     } label: {
                         Text("Click to talk to AI")
@@ -98,8 +82,7 @@ struct AIVideoDemoApp: App {
                     try await connect()
                 }
             }
-        }
-        
+        }        
     }
     
     func connect() async throws {
@@ -116,6 +99,23 @@ struct AIVideoDemoApp: App {
         self.credentials = credentials
         
         try await streamVideo.connect()
+    }
+    
+    func joinCall() async throws {
+        do {
+            self.callState = .joining
+            _ = await connectTask?.result
+            guard let credentials, let streamVideo else { return }
+            self.call = streamVideo.call(
+                callType: credentials.callType,
+                callId: credentials.callId
+            )
+            try await call?.join(create: true)
+            self.callState = .active
+        } catch {
+            print(error)
+            self.callState = .idle
+        }
     }
 
     func fetchCredentials() async throws -> Credentials {
