@@ -37,7 +37,6 @@ struct AISpeakingView: View {
     @ObservedObject var callState: CallState
     
     @State var amplitude: CGFloat = 0.0
-    @State var aiParticipant: CallParticipant?
     @State var audioLevels = [Float]()
     @State var speakerState: AISpeakerState = .idle
         
@@ -46,11 +45,6 @@ struct AISpeakingView: View {
             .frame(maxWidth: .infinity, maxHeight: .infinity)
             .padding()
             .background(Color.black)
-            .onReceive(callState.$participants) { _ in
-                if let participant = self.callState.participants.first(where: { $0.userId.contains(agentId) }) {
-                    aiParticipant = participant
-                }
-            }
             .onChange(of: callState.activeSpeakers) { oldSpeakers, newSpeakers in
                 if let speaker = newSpeakers.first(where: { participant in
                     participant.userId.contains(agentId)

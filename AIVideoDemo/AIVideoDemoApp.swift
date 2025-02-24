@@ -19,6 +19,8 @@ struct AIVideoDemoApp: App {
     @State var callState: AICallState = .idle
     @State private var captions: [CallClosedCaption] = []
     
+    private let baseURL = "https://stream-openai-d0716d0c2d64.herokuapp.com"
+    
     var body: some Scene {
         WindowGroup {
             ZStack {
@@ -110,6 +112,9 @@ struct AIVideoDemoApp: App {
                 callType: credentials.callType,
                 callId: credentials.callId
             )
+            Task {
+                try await connectAI(to: credentials.cid)
+            }
             try await call?.join(create: true)
             self.callState = .active
         } catch {
@@ -120,11 +125,19 @@ struct AIVideoDemoApp: App {
 
     func fetchCredentials() async throws -> Credentials {
         let urlSession = URLSession.shared
-        let url = URL(string: "https://stream-openai-d0716d0c2d64.herokuapp.com/")!
+        let url = URL(string: "\(baseURL)/credentials")!
         var request = URLRequest(url: url)
-        request.httpMethod = "POST"
+        request.httpMethod = "GET"
         let data = try await urlSession.data(for: request).0 as Data
         return try JSONDecoder().decode(Credentials.self, from: data)
+    }
+    
+    func connectAI(to channelId: String) async throws {
+        let urlSession = URLSession.shared
+        let url = URL(string: "\(baseURL)/\(channelId)/connect")!
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+        _ = try await urlSession.data(for: request)
     }
 }
 
